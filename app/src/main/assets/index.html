@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Water & Sand Ripple</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.ripples/0.5.3/jquery.ripples.min.js"></script>
+</head>
+<body>
+    <canvas id="riverbed-layer"></canvas>
+    <div id="water-layer"></div>
+    <canvas id="weather-layer"></canvas>
+
+    <div class="event-bar" role="group" aria-label="물 이벤트">
+        <button class="event-button active" data-mode="clear" type="button">맑음</button>
+        <button class="event-button" data-mode="stone" type="button">돌</button>
+        <button class="event-button" data-mode="rain" type="button">비</button>
+        <button class="event-button" data-mode="snow" type="button">눈</button>
+        <button class="event-button" data-mode="wave" type="button">파도</button>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
