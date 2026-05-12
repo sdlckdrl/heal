@@ -76,7 +76,7 @@
             uniform float u_time;
             uniform int u_dropCount;
             uniform vec2 u_tilt;
-            uniform vec4 u_fish[7];
+            uniform vec4 u_fish[14];
 
             vec2 coverUv(vec2 uv, vec2 screen, vec2 image) {
                 float screenRatio = screen.x / screen.y;
@@ -164,7 +164,7 @@
                 imageUv = clamp(imageUv, vec2(0.001), vec2(0.999));
                 vec3 color = texture2D(u_image, imageUv).rgb;
                 vec4 fishLayer = vec4(0.0);
-                for (int i = 0; i < 7; i++) {
+                for (int i = 0; i < 14; i++) {
                     vec4 fish = koiAt(uv + offset * 0.35, u_fish[i], i, u_time);
                     fishLayer.rgb = mix(fishLayer.rgb, fish.rgb, fish.a * (1.0 - fishLayer.a));
                     fishLayer.a = clamp(fishLayer.a + fish.a * (1.0 - fishLayer.a), 0.0, 1.0);
@@ -190,7 +190,23 @@
         let imageHeight = 1;
         let loadedTextures = 0;
         let lastMoveDropAt = 0;
-        const fishCount = 7;
+        const fishCount = 14;
+        const fishWorldScale = 2.4;
+        const fishWorldPadding = (fishWorldScale - 1) * 0.5;
+        const fishBounds = {
+            minX: -fishWorldPadding,
+            maxX: 1 + fishWorldPadding,
+            minY: -fishWorldPadding,
+            maxY: 1 + fishWorldPadding
+        };
+        const touchAvoidance = {
+            active: false,
+            x: 0.5,
+            y: 0.5,
+            lastAt: 0
+        };
+        const touchAvoidRadius = 0.24;
+        const fishTravelScale = 5.2;
         const fishData = createFish();
         const tilt = {
             x: 0,
@@ -314,6 +330,17 @@
             if (drops.length > 12) drops.shift();
         }
 
+        function setTouchAvoidance(clientX, clientY) {
+            touchAvoidance.active = true;
+            touchAvoidance.x = clientX / window.innerWidth;
+            touchAvoidance.y = 1 - clientY / window.innerHeight;
+            touchAvoidance.lastAt = performance.now() / 1000;
+        }
+
+        function clearTouchAvoidance() {
+            touchAvoidance.active = false;
+        }
+
         function createFish() {
             return [
                 { x: 0.16, y: 0.26, angle: 0.12, speed: 0.025, size: 0.074, phase: 0.3, wave: 0.04 },
@@ -322,29 +349,75 @@
                 { x: 0.28, y: 0.58, angle: 5.85, speed: 0.016, size: 0.08, phase: 4.0, wave: 0.025 },
                 { x: 0.88, y: 0.82, angle: 3.1, speed: 0.02, size: 0.064, phase: 0.9, wave: 0.04 },
                 { x: 0.62, y: 0.42, angle: 0.28, speed: 0.014, size: 0.1, phase: 2.1, wave: 0.022 },
-                { x: 0.08, y: 0.78, angle: 0.05, speed: 0.019, size: 0.071, phase: 5.2, wave: 0.035 }
-            ];
+                { x: 0.08, y: 0.78, angle: 0.05, speed: 0.019, size: 0.071, phase: 5.2, wave: 0.035 },
+                { x: 0.38, y: 0.34, angle: 0.18, speed: 0.021, size: 0.066, phase: 3.6, wave: 0.034 },
+                { x: 0.72, y: 0.64, angle: 3.36, speed: 0.017, size: 0.083, phase: 4.7, wave: 0.026 },
+                { x: 1.18, y: 0.46, angle: 3.05, speed: 0.023, size: 0.072, phase: 1.1, wave: 0.038 },
+                { x: -0.25, y: 0.36, angle: 0.08, speed: 0.019, size: 0.088, phase: 2.4, wave: 0.03 },
+                { x: 0.23, y: 1.22, angle: 5.48, speed: 0.016, size: 0.076, phase: 5.8, wave: 0.028 },
+                { x: 0.94, y: -0.18, angle: 1.38, speed: 0.02, size: 0.069, phase: 0.6, wave: 0.041 },
+                { x: 1.36, y: 0.92, angle: 3.54, speed: 0.018, size: 0.095, phase: 3.1, wave: 0.024 }
+            ].map(function(fish, index) {
+                fish.currentSpeed = fish.speed * fishTravelScale;
+                fish.paceRate = 0.42 + (index % 5) * 0.15;
+                fish.paceSwing = 0.08 + (index % 4) * 0.055;
+                fish.paceOffset = fish.phase * 1.37;
+                fish.escape = 0;
+                return fish;
+            });
         }
 
         function updateFish(now) {
-            fishData.forEach(function(fish, index) {
+            const touchIsRecent = touchAvoidance.active && now - touchAvoidance.lastAt < 0.6;
+            const aspect = Math.max(0.5, window.innerWidth / Math.max(1, window.innerHeight));
+            fishData.forEach(function(fish) {
                 const swim = Math.sin(now * 1.15 + fish.phase) * fish.wave;
-                const turn = Math.sin(now * 0.42 + fish.phase) * 0.012;
+                const turn = Math.sin(now * 0.42 + fish.phase) * 0.004;
                 fish.angle += turn;
-                fish.x += Math.cos(fish.angle) * fish.speed * 0.016;
-                fish.y += Math.sin(fish.angle) * fish.speed * 0.016 + swim * 0.002;
 
-                if (fish.x < -0.12) fish.x = 1.12;
-                if (fish.x > 1.12) fish.x = -0.12;
-                if (fish.y < -0.08) {
-                    fish.y = 0.08;
+                if (touchIsRecent) {
+                    const dx = fish.x - touchAvoidance.x;
+                    const dy = fish.y - touchAvoidance.y;
+                    const screenDx = dx * aspect;
+                    const distance = Math.hypot(screenDx, dy);
+                    if (distance < touchAvoidRadius) {
+                        const rawDistance = Math.hypot(dx, dy);
+                        const awayX = rawDistance > 0.0001 ? dx / rawDistance : Math.cos(fish.angle);
+                        const awayY = rawDistance > 0.0001 ? dy / rawDistance : Math.sin(fish.angle);
+                        const force = Math.pow(1 - distance / touchAvoidRadius, 1.65);
+                        fish.angle = steerAngle(fish.angle, Math.atan2(awayY, awayX), 0.018 + force * 0.08);
+                        fish.escape = Math.max(fish.escape || 0, force);
+                    }
+                }
+
+                const escape = fish.escape || 0;
+                const pace = 1
+                    + Math.sin(now * fish.paceRate + fish.paceOffset) * fish.paceSwing
+                    + Math.sin(now * fish.paceRate * 0.37 + fish.phase) * 0.05;
+                const targetSpeed = fish.speed * fishTravelScale * pace * (1 + escape * 1.9);
+                const speedEase = escape > 0.05 ? 0.11 : 0.035;
+                fish.currentSpeed += (targetSpeed - fish.currentSpeed) * speedEase;
+                const travelStep = fish.currentSpeed * 0.016;
+                fish.x += Math.cos(fish.angle) * travelStep;
+                fish.y += Math.sin(fish.angle) * travelStep + swim * 0.002;
+                fish.escape = escape * 0.91;
+
+                if (fish.x < fishBounds.minX) fish.x = fishBounds.maxX;
+                if (fish.x > fishBounds.maxX) fish.x = fishBounds.minX;
+                if (fish.y < fishBounds.minY) {
+                    fish.y = fishBounds.minY;
                     fish.angle = -fish.angle;
                 }
-                if (fish.y > 1.08) {
-                    fish.y = 0.92;
+                if (fish.y > fishBounds.maxY) {
+                    fish.y = fishBounds.maxY;
                     fish.angle = -fish.angle;
                 }
             });
+        }
+
+        function steerAngle(current, target, maxStep) {
+            const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+            return current + clamp(delta, -maxStep, maxStep);
         }
 
         function fishUniformValues() {
@@ -362,17 +435,26 @@
         function bindInput() {
             canvas.addEventListener('pointerdown', function(event) {
                 event.preventDefault();
+                setTouchAvoidance(event.clientX, event.clientY);
+                if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
                 addDrop(event.clientX, event.clientY, 1.0);
             });
 
             canvas.addEventListener('pointermove', function(event) {
                 if (!event.isPrimary) return;
                 if (event.pressure === 0 && event.pointerType !== 'mouse') return;
+                if (touchAvoidance.active || event.buttons > 0 || event.pointerType !== 'mouse') {
+                    setTouchAvoidance(event.clientX, event.clientY);
+                }
                 const now = performance.now();
                 if (now - lastMoveDropAt < 110) return;
                 lastMoveDropAt = now;
                 addDrop(event.clientX, event.clientY, 0.42);
             });
+
+            canvas.addEventListener('pointerup', clearTouchAvoidance);
+            canvas.addEventListener('pointercancel', clearTouchAvoidance);
+            canvas.addEventListener('pointerleave', clearTouchAvoidance);
 
             window.addEventListener('deviceorientation', function(event) {
                 const gamma = typeof event.gamma === 'number' ? event.gamma : 0;
