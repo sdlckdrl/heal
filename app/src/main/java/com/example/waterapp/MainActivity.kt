@@ -19,6 +19,8 @@ class MainActivity : Activity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = true
+            allowFileAccessFromFileURLs = true
+            allowUniversalAccessFromFileURLs = true
             allowContentAccess = true
             loadWithOverviewMode = true
             useWideViewPort = true
