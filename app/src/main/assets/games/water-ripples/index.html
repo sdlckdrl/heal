@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Water Ripple Shader</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: #031018;
+            touch-action: none;
+            user-select: none;
+        }
+
+        #water-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+
+        .ui-guide {
+            position: fixed;
+            bottom: 30px;
+            left: 0;
+            z-index: 10;
+            width: 100%;
+            color: rgba(255, 255, 255, 0.72);
+            font-family: "Malgun Gothic", Arial, sans-serif;
+            font-size: 14px;
+            text-align: center;
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="water-canvas"></canvas>
+    <div class="ui-guide">물 위를 터치해 보세요</div>
+
+    <script>
+        const canvas = document.getElementById('water-canvas');
+        const gl = canvas.getContext('webgl', {
+            alpha: false,
+            antialias: false,
+            depth: false,
+            stencil: false,
+            preserveDrawingBuffer: false
+        });
+
+        const vertexSource = `
+            attribute vec2 a_position;
+            varying vec2 v_uv;
+
+            void main() {
+                v_uv = a_position * 0.5 + 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
+
+        const renderSource = `
+            precision mediump float;
+
+            varying vec2 v_uv;
+            uniform sampler2D u_image;
+            uniform vec2 u_resolution;
+            uniform vec2 u_imageResolution;
+            uniform vec2 u_drops[12];
+            uniform float u_startTimes[12];
+            uniform float u_strengths[12];
+            uniform float u_time;
+            uniform int u_dropCount;
+
+            vec2 coverUv(vec2 uv, vec2 screen, vec2 image) {
+                float screenRatio = screen.x / screen.y;
+                float imageRatio = image.x / image.y;
+                vec2 scale = vec2(1.0);
+                if (screenRatio > imageRatio) {
+                    scale.y = imageRatio / screenRatio;
+                } else {
+                    scale.x = screenRatio / imageRatio;
+                }
+                return (uv - 0.5) * scale + 0.5;
+            }
+
+            void main() {
+                vec2 uv = v_uv;
+                vec2 aspectUv = vec2(uv.x * u_resolution.x / u_resolution.y, uv.y);
+                vec2 offset = vec2(0.0);
+                float light = 0.0;
+
+                for (int i = 0; i < 12; i++) {
+                    if (i >= u_dropCount) break;
+                    float age = u_time - u_startTimes[i];
+                    if (age < 0.0 || age > 2.8) continue;
+
+                    vec2 drop = vec2(u_drops[i].x * u_resolution.x / u_resolution.y, u_drops[i].y);
+                    vec2 delta = aspectUv - drop;
+                    float dist = length(delta);
+                    float radius = age * 0.24;
+                    float width = 0.028 + age * 0.006;
+                    float envelope = exp(-pow((dist - radius) / width, 2.0));
+                    float fade = exp(-age * 1.7);
+                    float wave = sin((dist - radius) * 95.0) * envelope * fade * u_strengths[i];
+                    vec2 dir = dist > 0.0001 ? delta / dist : vec2(0.0);
+                    offset += dir * wave * 0.018;
+                    light += abs(wave) * 0.23;
+                }
+
+                vec2 imageUv = coverUv(uv + offset, u_resolution, u_imageResolution);
+                imageUv = clamp(imageUv, vec2(0.001), vec2(0.999));
+                vec3 color = texture2D(u_image, imageUv).rgb;
+                vec3 waterTint = vec3(0.72, 1.0, 0.94);
+                color = mix(color, color * waterTint, 0.22);
+                color += light * vec3(0.5, 0.85, 0.8);
+                color *= smoothstep(0.0, 0.12, uv.y) * smoothstep(1.0, 0.88, uv.y) * 0.22 + 0.86;
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        const program = createProgram(vertexSource, renderSource);
+        const buffer = gl.createBuffer();
+        const drops = [];
+        let imageTexture = null;
+        let imageWidth = 1;
+        let imageHeight = 1;
+        let lastMoveDropAt = 0;
+
+        const locations = {
+            position: gl.getAttribLocation(program, 'a_position'),
+            image: gl.getUniformLocation(program, 'u_image'),
+            resolution: gl.getUniformLocation(program, 'u_resolution'),
+            imageResolution: gl.getUniformLocation(program, 'u_imageResolution'),
+            drops: gl.getUniformLocation(program, 'u_drops[0]'),
+            startTimes: gl.getUniformLocation(program, 'u_startTimes[0]'),
+            strengths: gl.getUniformLocation(program, 'u_strengths[0]'),
+            time: gl.getUniformLocation(program, 'u_time'),
+            dropCount: gl.getUniformLocation(program, 'u_dropCount')
+        };
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(
+            gl.ARRAY_BUFFER,
+            new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+            gl.STATIC_DRAW
+        );
+
+        const image = new Image();
+        image.onload = function() {
+            imageWidth = image.naturalWidth || image.width;
+            imageHeight = image.naturalHeight || image.height;
+            imageTexture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, imageTexture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            requestAnimationFrame(render);
+        };
+        image.src = 'textures/river-coral-floor-generated.png';
+
+        function createShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                throw new Error(gl.getShaderInfoLog(shader));
+            }
+            return shader;
+        }
+
+        function createProgram(vertex, fragment) {
+            const vertexShader = createShader(gl.VERTEX_SHADER, vertex);
+            const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragment);
+            const nextProgram = gl.createProgram();
+            gl.attachShader(nextProgram, vertexShader);
+            gl.attachShader(nextProgram, fragmentShader);
+            gl.linkProgram(nextProgram);
+            if (!gl.getProgramParameter(nextProgram, gl.LINK_STATUS)) {
+                throw new Error(gl.getProgramInfoLog(nextProgram));
+            }
+            return nextProgram;
+        }
+
+        function resizeCanvas() {
+            const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+            const width = Math.max(1, Math.floor(window.innerWidth * pixelRatio));
+            const height = Math.max(1, Math.floor(window.innerHeight * pixelRatio));
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+            }
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        function addDrop(clientX, clientY, strength) {
+            drops.push({
+                x: clientX / window.innerWidth,
+                y: 1 - clientY / window.innerHeight,
+                start: performance.now() / 1000,
+                strength
+            });
+            if (drops.length > 12) drops.shift();
+        }
+
+        function bindInput() {
+            canvas.addEventListener('pointerdown', function(event) {
+                event.preventDefault();
+                addDrop(event.clientX, event.clientY, 1.0);
+            });
+
+            canvas.addEventListener('pointermove', function(event) {
+                if (!event.isPrimary) return;
+                if (event.pressure === 0 && event.pointerType !== 'mouse') return;
+                const now = performance.now();
+                if (now - lastMoveDropAt < 110) return;
+                lastMoveDropAt = now;
+                addDrop(event.clientX, event.clientY, 0.42);
+            });
+        }
+
+        function render(nowMs) {
+            resizeCanvas();
+            const now = nowMs / 1000;
+            while (drops.length && now - drops[0].start > 2.9) drops.shift();
+
+            const dropValues = new Float32Array(24);
+            const timeValues = new Float32Array(12);
+            const strengthValues = new Float32Array(12);
+            drops.forEach(function(drop, index) {
+                dropValues[index * 2] = drop.x;
+                dropValues[index * 2 + 1] = drop.y;
+                timeValues[index] = drop.start;
+                strengthValues[index] = drop.strength;
+            });
+
+            gl.useProgram(program);
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.enableVertexAttribArray(locations.position);
+            gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, imageTexture);
+            gl.uniform1i(locations.image, 0);
+            gl.uniform2f(locations.resolution, canvas.width, canvas.height);
+            gl.uniform2f(locations.imageResolution, imageWidth, imageHeight);
+            gl.uniform2fv(locations.drops, dropValues);
+            gl.uniform1fv(locations.startTimes, timeValues);
+            gl.uniform1fv(locations.strengths, strengthValues);
+            gl.uniform1f(locations.time, now);
+            gl.uniform1i(locations.dropCount, drops.length);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+
+        if (!gl) {
+            document.querySelector('.ui-guide').textContent = '현재 환경에서는 WebGL 물결 효과를 지원하지 않습니다.';
+        } else {
+            bindInput();
+        }
+    </script>
+</body>
+</html>

@@ -8,3 +8,11 @@ Used for: Sun, planets, Moon, dwarf-planet fictional maps, Saturn ring, Earth cl
 NASA Exoplanet Archive
 Source: https://exoplanetarchive.ipac.caltech.edu/
 Used for: exoplanet host star coordinates and distances.
+
+Generated water floor background
+Source: OpenAI image generation
+Used for: water ripple mini game background texture.
+
+Generated river and emerald reef floor background
+Source: OpenAI image generation
+Used for: water ripple mini game natural riverbed and coral reef background texture.

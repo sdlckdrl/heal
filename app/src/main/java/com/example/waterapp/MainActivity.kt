@@ -22,6 +22,7 @@ class MainActivity : Activity() {
     private var lastBackPressedAt = 0L
     private var lastBackHandledAt = 0L
     private var statusBarInsetTop = 0
+    private lateinit var webView: WebView
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,7 +32,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.BLACK
 
         val root = FrameLayout(this)
-        val webView = WebView(this)
+        webView = WebView(this)
         root.addView(
             webView,
             FrameLayout.LayoutParams(
@@ -130,6 +131,12 @@ class MainActivity : Activity() {
         }
 
         lastBackHandledAt = now
+        if (::webView.isInitialized && webView.canGoBack()) {
+            webView.goBack()
+            lastBackPressedAt = 0L
+            return
+        }
+
         if (now - lastBackPressedAt <= BACK_EXIT_INTERVAL_MS) {
             finish()
             return

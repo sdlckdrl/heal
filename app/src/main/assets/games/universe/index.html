@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>우리 은하</title>
+    <link rel="stylesheet" href="css/universe.css">
+</head>
+<body>
+    <div id="info">
+        <strong>우리 은하</strong><br>
+        Solar System Scope 텍스처 기반 천체를 탐색합니다.<br>
+        <small class="credits">Textures: Solar System Scope, CC BY 4.0</small><br>
+        <small class="credits">Coordinate data: NASA Exoplanet Archive</small>
+    </div>
+
+    <div id="speed-panel" class="collapsed">
+        <div class="panel-topline">
+            <div id="date-display">2000-01-01</div>
+            <button id="panel-toggle" class="btn-icon" type="button" aria-label="시간 설정 펼치기" onclick="UniverseApp.toggleSpeedPanel()">⋯</button>
+        </div>
+        <button id="mode-toggle" class="btn-mode" type="button" onclick="UniverseApp.toggleCameraMode()">자유비행</button>
+        <div class="speed-details">
+            <label for="speed-slider">시간 가속도</label>
+            <input type="range" id="speed-slider" min="0" max="160" step="1" value="28">
+            <div id="speed-display">계산 중...</div>
+            <button class="btn-realtime" onclick="UniverseApp.resetToRealTime()">현재 시간으로 복귀</button>
+        </div>
+    </div>
+
+    <div id="context-panel" aria-label="선택한 천체의 하위 천체"></div>
+    <div id="ui-container" aria-label="천체 선택"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="js/solar-system-data.js"></script>
+    <script src="js/universe-app.js"></script>
+</body>
+</html>
