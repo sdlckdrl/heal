@@ -27,7 +27,7 @@
                 ]
             },
             { id: 'mercury', name: '수성', type: 'planet', radius: 0.8, distance: 15, orbitPeriodDays: 88, baseAngle: 4.3, spinSpeed: 0.01, texture: '2k_mercury.jpg', color: 0x8d8680 },
-            { id: 'venus', name: '금성', type: 'planet', radius: 1.5, distance: 22, orbitPeriodDays: 225, baseAngle: 3.1, spinSpeed: 0.005, texture: '2k_venus_surface.jpg', color: 0xc99658 },
+            { id: 'venus', name: '금성', type: 'planet', radius: 1.5, distance: 22, orbitPeriodDays: 225, baseAngle: 3.1, spinSpeed: 0.005, texture: '2k_venus_surface.jpg', atmosphereTexture: '2k_venus_atmosphere.jpg', color: 0xc99658 },
             {
                 id: 'earth',
                 name: '지구',
@@ -39,6 +39,7 @@
                 spinSpeed: 0.02,
                 axialTilt: 23.44,
                 texture: '2k_earth_daymap.jpg',
+                cloudTexture: '2k_earth_clouds.jpg',
                 color: 0x4b78d0,
                 realtimeRotation: true,
                 children: [
@@ -118,9 +119,9 @@
                 id: 'trappist-1-system',
                 name: 'TRAPPIST-1계',
                 position: [3650, 140, 1250],
-                distanceLy: 40.7,
-                galacticBearing: 2.38,
-                galacticHeight: 110,
+                raDeg: 346.6263919,
+                decDeg: -5.0434618,
+                distancePc: 12.42988881,
                 star: {
                     id: 'trappist-1',
                     name: 'TRAPPIST-1',
@@ -148,9 +149,9 @@
                 id: 'kepler-186-system',
                 name: 'Kepler-186계',
                 position: [-3300, -130, 1850],
-                distanceLy: 579,
-                galacticBearing: 3.05,
-                galacticHeight: -150,
+                raDeg: 298.652736,
+                decDeg: 43.9549884,
+                distancePc: 177.594,
                 star: {
                     id: 'kepler-186',
                     name: 'Kepler-186',
@@ -176,9 +177,9 @@
                 id: 'hd-189733-system',
                 name: 'HD 189733계',
                 position: [4200, 180, -1450],
-                distanceLy: 64.5,
-                galacticBearing: -0.65,
-                galacticHeight: 130,
+                raDeg: 300.1821223,
+                decDeg: 22.7097759,
+                distancePc: 19.7638,
                 star: {
                     id: 'hd-189733',
                     name: 'HD 189733',
@@ -204,9 +205,9 @@
                 id: 'proxima-system',
                 name: '프록시마계',
                 position: [2550, -90, -520],
-                distanceLy: 4.25,
-                galacticBearing: -1.55,
-                galacticHeight: -35,
+                raDeg: 217.3934657,
+                decDeg: -62.6761821,
+                distancePc: 1.30119,
                 star: {
                     id: 'proxima-centauri',
                     name: '프록시마 센타우리',

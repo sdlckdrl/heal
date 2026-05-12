@@ -1,0 +1,10 @@
+Texture and data credits
+
+Solar System Scope textures
+Source: https://www.solarsystemscope.com/textures/
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+Used for: Sun, planets, Moon, dwarf-planet fictional maps, Saturn ring, Earth cloud map, Venus atmosphere map.
+
+NASA Exoplanet Archive
+Source: https://exoplanetarchive.ipac.caltech.edu/
+Used for: exoplanet host star coordinates and distances.

@@ -24,7 +24,7 @@
     const allOrbiters = [];
     const selectableBodies = [];
     const SOLAR_X = 2200;
-    const LIGHT_YEAR_VIEW_SCALE = 850;
+    const LIGHT_YEAR_VIEW_SCALE = 105;
     const J2000 = new Date('2000-01-01T12:00:00Z').getTime();
 
     function init() {
@@ -544,17 +544,33 @@
     }
 
     function getStarSystemPosition(systemData) {
-        if (!systemData.distanceLy || typeof systemData.galacticBearing !== 'number') {
+        if (typeof systemData.raDeg !== 'number' || typeof systemData.decDeg !== 'number' || typeof systemData.distancePc !== 'number') {
             return new THREE.Vector3().fromArray(systemData.position || [0, 0, 0]);
         }
 
-        const visualDistance = Math.log10(systemData.distanceLy + 1) * LIGHT_YEAR_VIEW_SCALE;
-        const bearing = systemData.galacticBearing;
+        const galacticDirection = equatorialToGalacticDirection(systemData.raDeg, systemData.decDeg);
+        const distanceLy = systemData.distancePc * 3.26156;
+        const visualDistance = Math.sqrt(distanceLy) * LIGHT_YEAR_VIEW_SCALE;
         return new THREE.Vector3(
-            SOLAR_X + Math.cos(bearing) * visualDistance,
-            systemData.galacticHeight || 0,
-            Math.sin(bearing) * visualDistance
+            SOLAR_X + galacticDirection.x * visualDistance,
+            galacticDirection.y * visualDistance,
+            galacticDirection.z * visualDistance
         );
+    }
+
+    function equatorialToGalacticDirection(raDeg, decDeg) {
+        const ra = THREE.MathUtils.degToRad(raDeg);
+        const dec = THREE.MathUtils.degToRad(decDeg);
+        const cosDec = Math.cos(dec);
+        const eqX = cosDec * Math.cos(ra);
+        const eqY = cosDec * Math.sin(ra);
+        const eqZ = Math.sin(dec);
+
+        return new THREE.Vector3(
+            -0.0548755604 * eqX - 0.8734370902 * eqY - 0.4838350155 * eqZ,
+            -0.8676661490 * eqX - 0.1980763734 * eqY + 0.4559837762 * eqZ,
+            0.4941094279 * eqX - 0.4448296300 * eqY + 0.7469822445 * eqZ
+        ).normalize();
     }
 
     function buildBody(body, parentGroup, parentRecord) {
@@ -574,6 +590,8 @@
         const material = makeBodyMaterial(body);
         const mesh = new THREE.Mesh(new THREE.SphereGeometry(body.radius, 64, 64), material);
         tiltGroup.add(mesh);
+        if (body.cloudTexture) addCloudLayer(mesh, body);
+        if (body.atmosphereTexture) addAtmosphereLayer(mesh, body);
 
         if (body.glow) addGlow(system, body.glow);
         if (body.type === 'star') addStarLight(system, body);
@@ -613,6 +631,40 @@
             roughness: 0.62,
             metalness: 0.05
         });
+    }
+
+    function addCloudLayer(mesh, body) {
+        const cloudMap = loadTexture(body.cloudTexture);
+        if (!cloudMap) return;
+
+        mesh.add(new THREE.Mesh(
+            new THREE.SphereGeometry(body.radius * 1.018, 64, 64),
+            new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                map: cloudMap,
+                alphaMap: cloudMap,
+                transparent: true,
+                opacity: 0.72,
+                roughness: 0.78,
+                metalness: 0,
+                depthWrite: false
+            })
+        ));
+    }
+
+    function addAtmosphereLayer(mesh, body) {
+        const atmosphereMap = loadTexture(body.atmosphereTexture);
+        if (!atmosphereMap) return;
+
+        mesh.add(new THREE.Mesh(
+            new THREE.SphereGeometry(body.radius * 1.025, 64, 64),
+            new THREE.MeshBasicMaterial({
+                map: atmosphereMap,
+                transparent: true,
+                opacity: 0.58,
+                depthWrite: false
+            })
+        ));
     }
 
     function createProceduralTexture(body) {

@@ -36,10 +36,15 @@ canvas {
 #info {
     top: 20px;
     left: 20px;
-    max-width: 320px;
+    max-width: 360px;
     padding: 14px 15px;
     line-height: 1.45;
     pointer-events: none;
+}
+
+#info .credits {
+    color: rgba(220, 235, 255, 0.78);
+    font-size: 11px;
 }
 
 #speed-panel {
