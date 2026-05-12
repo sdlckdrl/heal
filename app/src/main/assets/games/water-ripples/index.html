@@ -67,6 +67,7 @@
 
             varying vec2 v_uv;
             uniform sampler2D u_image;
+            uniform sampler2D u_fishImage;
             uniform vec2 u_resolution;
             uniform vec2 u_imageResolution;
             uniform vec2 u_drops[12];
@@ -74,6 +75,8 @@
             uniform float u_strengths[12];
             uniform float u_time;
             uniform int u_dropCount;
+            uniform vec2 u_tilt;
+            uniform vec4 u_fish[7];
 
             vec2 coverUv(vec2 uv, vec2 screen, vec2 image) {
                 float screenRatio = screen.x / screen.y;
@@ -87,10 +90,52 @@
                 return (uv - 0.5) * scale + 0.5;
             }
 
+            float ellipseMask(vec2 p, vec2 size) {
+                float d = dot(p / size, p / size);
+                return smoothstep(1.0, 0.72, d);
+            }
+
+            float ringMask(vec2 p, vec2 size, float inner) {
+                float d = dot(p / size, p / size);
+                return smoothstep(1.0, 0.86, d) - smoothstep(inner, inner * 0.82, d);
+            }
+
+            vec4 koiAt(vec2 uv, vec4 fish, int index, float time) {
+                vec2 p = uv - fish.xy;
+                float angle = fish.z;
+                float size = fish.w;
+                float c = cos(angle);
+                float s = sin(angle);
+                vec2 local = vec2(c * p.x + s * p.y, -s * p.x + c * p.y) / size;
+                float fishId = float(index);
+                float swim = sin(time * 7.0 + fishId * 1.73 + local.x * 3.4);
+                float tailZone = smoothstep(-0.25, -1.25, local.x);
+                local.y += swim * tailZone * 0.18;
+
+                vec2 spriteUv = vec2((local.x + 1.38) / 2.76, 1.0 - (local.y + 0.68) / 1.36);
+                if (spriteUv.x < 0.0 || spriteUv.x > 1.0 || spriteUv.y < 0.0 || spriteUv.y > 1.0) {
+                    return vec4(0.0);
+                }
+
+                float atlasIndex = mod(fishId, 4.0);
+                float column = mod(atlasIndex, 2.0);
+                float row = floor(atlasIndex / 2.0);
+                vec2 atlasUv = (spriteUv + vec2(column, row)) * 0.5;
+                vec4 tex = texture2D(u_fishImage, atlasUv);
+                float alpha = smoothstep(0.04, 0.62, tex.a);
+                float inner = smoothstep(0.18, 0.85, tex.a);
+                vec3 fishColor = tex.rgb * (0.72 + inner * 0.28);
+                fishColor = mix(fishColor, fishColor * vec3(0.72, 0.95, 0.9), 0.18);
+                fishColor += inner * vec3(0.03, 0.04, 0.025);
+                return vec4(fishColor, alpha * 0.92);
+            }
+
             void main() {
                 vec2 uv = v_uv;
                 vec2 aspectUv = vec2(uv.x * u_resolution.x / u_resolution.y, uv.y);
-                vec2 offset = vec2(0.0);
+                float tiltStrength = clamp(length(u_tilt), 0.0, 1.0);
+                vec2 tiltDir = tiltStrength > 0.001 ? normalize(u_tilt) : vec2(0.0, -1.0);
+                vec2 offset = u_tilt * 0.014;
                 float light = 0.0;
 
                 for (int i = 0; i < 12; i++) {
@@ -111,12 +156,25 @@
                     light += abs(wave) * 0.23;
                 }
 
+                float slope = dot(uv - 0.5, tiltDir);
+                float pooled = smoothstep(0.02, 0.5, slope) * tiltStrength;
+                offset += tiltDir * pooled * 0.016;
+
                 vec2 imageUv = coverUv(uv + offset, u_resolution, u_imageResolution);
                 imageUv = clamp(imageUv, vec2(0.001), vec2(0.999));
                 vec3 color = texture2D(u_image, imageUv).rgb;
+                vec4 fishLayer = vec4(0.0);
+                for (int i = 0; i < 7; i++) {
+                    vec4 fish = koiAt(uv + offset * 0.35, u_fish[i], i, u_time);
+                    fishLayer.rgb = mix(fishLayer.rgb, fish.rgb, fish.a * (1.0 - fishLayer.a));
+                    fishLayer.a = clamp(fishLayer.a + fish.a * (1.0 - fishLayer.a), 0.0, 1.0);
+                }
+                color = mix(color, fishLayer.rgb, fishLayer.a);
                 vec3 waterTint = vec3(0.72, 1.0, 0.94);
                 color = mix(color, color * waterTint, 0.22);
                 color += light * vec3(0.5, 0.85, 0.8);
+                color = mix(color, color * vec3(0.64, 1.08, 0.96) + vec3(0.03, 0.08, 0.06), pooled * 0.42);
+                color += pow(max(pooled, 0.0), 2.0) * vec3(0.08, 0.18, 0.14);
                 color *= smoothstep(0.0, 0.12, uv.y) * smoothstep(1.0, 0.88, uv.y) * 0.22 + 0.86;
                 gl_FragColor = vec4(color, 1.0);
             }
@@ -126,20 +184,34 @@
         const buffer = gl.createBuffer();
         const drops = [];
         let imageTexture = null;
+        let fishTexture = null;
+        let fallbackTexture = null;
         let imageWidth = 1;
         let imageHeight = 1;
+        let loadedTextures = 0;
         let lastMoveDropAt = 0;
+        const fishCount = 7;
+        const fishData = createFish();
+        const tilt = {
+            x: 0,
+            y: 0,
+            smoothX: 0,
+            smoothY: 0
+        };
 
         const locations = {
             position: gl.getAttribLocation(program, 'a_position'),
             image: gl.getUniformLocation(program, 'u_image'),
+            fishImage: gl.getUniformLocation(program, 'u_fishImage'),
             resolution: gl.getUniformLocation(program, 'u_resolution'),
             imageResolution: gl.getUniformLocation(program, 'u_imageResolution'),
             drops: gl.getUniformLocation(program, 'u_drops[0]'),
             startTimes: gl.getUniformLocation(program, 'u_startTimes[0]'),
             strengths: gl.getUniformLocation(program, 'u_strengths[0]'),
             time: gl.getUniformLocation(program, 'u_time'),
-            dropCount: gl.getUniformLocation(program, 'u_dropCount')
+            dropCount: gl.getUniformLocation(program, 'u_dropCount'),
+            tilt: gl.getUniformLocation(program, 'u_tilt'),
+            fish: gl.getUniformLocation(program, 'u_fish[0]')
         };
 
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -149,21 +221,54 @@
             gl.STATIC_DRAW
         );
 
-        const image = new Image();
-        image.onload = function() {
+        function loadTexture(src, onLoad) {
+            const image = new Image();
+            image.onload = function() {
+                const texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+                onLoad(texture, image);
+                loadedTextures += 1;
+                if (loadedTextures === 2) requestAnimationFrame(render);
+            };
+            image.src = src;
+        }
+
+        loadTexture('textures/river-coral-floor-generated.png', function(texture, image) {
+            imageTexture = texture;
             imageWidth = image.naturalWidth || image.width;
             imageHeight = image.naturalHeight || image.height;
-            imageTexture = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, imageTexture);
+        });
+
+        loadTexture('textures/koi-atlas.png', function(texture) {
+            fishTexture = texture;
+        });
+
+        function createFallbackTexture() {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-            requestAnimationFrame(render);
-        };
-        image.src = 'textures/river-coral-floor-generated.png';
+            gl.texImage2D(
+                gl.TEXTURE_2D,
+                0,
+                gl.RGBA,
+                1,
+                1,
+                0,
+                gl.RGBA,
+                gl.UNSIGNED_BYTE,
+                new Uint8Array([0, 0, 0, 0])
+            );
+            return texture;
+        }
 
         function createShader(type, source) {
             const shader = gl.createShader(type);
@@ -209,6 +314,51 @@
             if (drops.length > 12) drops.shift();
         }
 
+        function createFish() {
+            return [
+                { x: 0.16, y: 0.26, angle: 0.12, speed: 0.025, size: 0.074, phase: 0.3, wave: 0.04 },
+                { x: 0.78, y: 0.2, angle: 3.24, speed: 0.018, size: 0.09, phase: 1.7, wave: 0.03 },
+                { x: 0.48, y: 0.72, angle: 0.0, speed: 0.022, size: 0.067, phase: 2.9, wave: 0.05 },
+                { x: 0.28, y: 0.58, angle: 5.85, speed: 0.016, size: 0.08, phase: 4.0, wave: 0.025 },
+                { x: 0.88, y: 0.82, angle: 3.1, speed: 0.02, size: 0.064, phase: 0.9, wave: 0.04 },
+                { x: 0.62, y: 0.42, angle: 0.28, speed: 0.014, size: 0.1, phase: 2.1, wave: 0.022 },
+                { x: 0.08, y: 0.78, angle: 0.05, speed: 0.019, size: 0.071, phase: 5.2, wave: 0.035 }
+            ];
+        }
+
+        function updateFish(now) {
+            fishData.forEach(function(fish, index) {
+                const swim = Math.sin(now * 1.15 + fish.phase) * fish.wave;
+                const turn = Math.sin(now * 0.42 + fish.phase) * 0.012;
+                fish.angle += turn;
+                fish.x += Math.cos(fish.angle) * fish.speed * 0.016;
+                fish.y += Math.sin(fish.angle) * fish.speed * 0.016 + swim * 0.002;
+
+                if (fish.x < -0.12) fish.x = 1.12;
+                if (fish.x > 1.12) fish.x = -0.12;
+                if (fish.y < -0.08) {
+                    fish.y = 0.08;
+                    fish.angle = -fish.angle;
+                }
+                if (fish.y > 1.08) {
+                    fish.y = 0.92;
+                    fish.angle = -fish.angle;
+                }
+            });
+        }
+
+        function fishUniformValues() {
+            const values = new Float32Array(fishCount * 4);
+            fishData.forEach(function(fish, index) {
+                const tailWiggle = Math.sin(performance.now() * 0.004 + fish.phase) * 0.04;
+                values[index * 4] = fish.x;
+                values[index * 4 + 1] = fish.y;
+                values[index * 4 + 2] = fish.angle + tailWiggle;
+                values[index * 4 + 3] = fish.size;
+            });
+            return values;
+        }
+
         function bindInput() {
             canvas.addEventListener('pointerdown', function(event) {
                 event.preventDefault();
@@ -223,11 +373,25 @@
                 lastMoveDropAt = now;
                 addDrop(event.clientX, event.clientY, 0.42);
             });
+
+            window.addEventListener('deviceorientation', function(event) {
+                const gamma = typeof event.gamma === 'number' ? event.gamma : 0;
+                const beta = typeof event.beta === 'number' ? event.beta : 45;
+                tilt.x = clamp(gamma / 42, -1, 1);
+                tilt.y = clamp((beta - 45) / 52, -1, 1);
+            });
+        }
+
+        function clamp(value, min, max) {
+            return Math.max(min, Math.min(max, value));
         }
 
         function render(nowMs) {
             resizeCanvas();
             const now = nowMs / 1000;
+            tilt.smoothX += (tilt.x - tilt.smoothX) * 0.06;
+            tilt.smoothY += (tilt.y - tilt.smoothY) * 0.06;
+            updateFish(now);
             while (drops.length && now - drops[0].start > 2.9) drops.shift();
 
             const dropValues = new Float32Array(24);
@@ -247,6 +411,10 @@
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, imageTexture);
             gl.uniform1i(locations.image, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            if (!fallbackTexture) fallbackTexture = createFallbackTexture();
+            gl.bindTexture(gl.TEXTURE_2D, fishTexture || fallbackTexture);
+            gl.uniform1i(locations.fishImage, 1);
             gl.uniform2f(locations.resolution, canvas.width, canvas.height);
             gl.uniform2f(locations.imageResolution, imageWidth, imageHeight);
             gl.uniform2fv(locations.drops, dropValues);
@@ -254,6 +422,8 @@
             gl.uniform1fv(locations.strengths, strengthValues);
             gl.uniform1f(locations.time, now);
             gl.uniform1i(locations.dropCount, drops.length);
+            gl.uniform2f(locations.tilt, tilt.smoothX, -tilt.smoothY);
+            gl.uniform4fv(locations.fish, fishUniformValues());
             gl.drawArrays(gl.TRIANGLES, 0, 6);
             requestAnimationFrame(render);
         }

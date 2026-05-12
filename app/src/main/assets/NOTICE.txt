@@ -16,3 +16,7 @@ Used for: water ripple mini game background texture.
 Generated river and emerald reef floor background
 Source: OpenAI image generation
 Used for: water ripple mini game natural riverbed and coral reef background texture.
+
+Generated koi fish sprite atlas
+Source: OpenAI image generation
+Used for: water ripple mini game fish texture atlas.
