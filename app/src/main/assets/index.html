@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>3D 우주 시뮬레이터</title>
     <link rel="stylesheet" href="css/universe.css">
 </head>
@@ -14,12 +14,18 @@
         <small class="credits">Coordinate data: NASA Exoplanet Archive</small>
     </div>
 
-    <div id="speed-panel">
-        <div id="date-display">2000-01-01</div>
-        <label for="speed-slider">시간 가속도</label>
-        <input type="range" id="speed-slider" min="0" max="100" step="1" value="50">
-        <div id="speed-display">계산 중...</div>
-        <button class="btn-realtime" onclick="UniverseApp.resetToRealTime()">현재 시간으로 복귀</button>
+    <div id="speed-panel" class="collapsed">
+        <div class="panel-topline">
+            <div id="date-display">2000-01-01</div>
+            <button id="panel-toggle" class="btn-icon" type="button" aria-label="시간 설정 펼치기" onclick="UniverseApp.toggleSpeedPanel()">⋯</button>
+        </div>
+        <button id="mode-toggle" class="btn-mode" type="button" onclick="UniverseApp.toggleCameraMode()">자유비행</button>
+        <div class="speed-details">
+            <label for="speed-slider">시간 가속도</label>
+            <input type="range" id="speed-slider" min="0" max="160" step="1" value="80">
+            <div id="speed-display">계산 중...</div>
+            <button class="btn-realtime" onclick="UniverseApp.resetToRealTime()">현재 시간으로 복귀</button>
+        </div>
     </div>
 
     <div id="context-panel" aria-label="선택한 천체의 하위 천체"></div>

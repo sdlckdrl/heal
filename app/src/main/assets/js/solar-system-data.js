@@ -40,6 +40,8 @@
                 axialTilt: 23.44,
                 texture: '2k_earth_daymap.jpg',
                 cloudTexture: '2k_earth_clouds.jpg',
+                nightTexture: '2k_earth_nightmap.jpg',
+                nightIntensity: 0.72,
                 color: 0x4b78d0,
                 realtimeRotation: true,
                 children: [

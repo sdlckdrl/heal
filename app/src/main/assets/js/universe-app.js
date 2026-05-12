@@ -8,7 +8,17 @@
         currentTarget: 'sun',
         previousTargetPosition: new THREE.Vector3(),
         isTransitioning: false,
-        lastFrameTime: performance.now()
+        lastFrameTime: performance.now(),
+        cameraMode: 'focus',
+        freeFlight: {
+            activePointers: new Map(),
+            lastPrimary: null,
+            lastMidpoint: null,
+            lastPinchDistance: null,
+            skipNextRotate: false,
+            yaw: 0,
+            pitch: 0
+        }
     };
 
     const scene = new THREE.Scene();
@@ -25,6 +35,7 @@
     const selectableBodies = [];
     const SOLAR_X = 2200;
     const LIGHT_YEAR_VIEW_SCALE = 105;
+    const ROTATION_VISUAL_SPEED_CAP = 1000000;
     const J2000 = new Date('2000-01-01T12:00:00Z').getTime();
 
     function init() {
@@ -59,6 +70,8 @@
         buildStarSystems();
         buildButtons();
         bindTimeControls();
+        bindCameraModeControls();
+        bindFreeFlightControls();
         bindResize();
 
         requestAnimationFrame(animate);
@@ -604,7 +617,8 @@
             system,
             orbitPivot,
             parent: parentRecord,
-            globalPos: new THREE.Vector3()
+            globalPos: new THREE.Vector3(),
+            visualRotationY: null
         };
         bodyRegistry[body.id] = record;
         allOrbiters.push(record);
@@ -625,9 +639,13 @@
         if (body.type === 'star') {
             return new THREE.MeshBasicMaterial({ map, color: body.color || 0xffffff });
         }
+        const nightMap = body.nightTexture ? loadTexture(body.nightTexture) : null;
         return new THREE.MeshStandardMaterial({
             map,
             color: map ? 0xffffff : (body.color || 0xffffff),
+            emissive: nightMap ? 0xffffff : 0x000000,
+            emissiveMap: nightMap,
+            emissiveIntensity: body.nightIntensity || 0,
             roughness: 0.62,
             metalness: 0.05
         });
@@ -960,11 +978,34 @@
                 state.speedMultiplier = 1;
                 speedDisplay.innerHTML = '<span style="color:#ffcc00">리얼타임 (현실 속도)</span>';
             } else {
-                state.speedMultiplier = val * 10000;
-                speedDisplay.innerHTML = '시간 가속: <b>' + (state.speedMultiplier / 10000).toFixed(0) + '만배</b>';
+                state.speedMultiplier = speedValueToMultiplier(val);
+                speedDisplay.innerHTML = '시간 가속: <b>' + formatSpeedMultiplier(state.speedMultiplier) + '</b>';
             }
         });
         speedSlider.dispatchEvent(new Event('input'));
+    }
+
+    function speedValueToMultiplier(value) {
+        return Math.round(Math.pow(10, 4 + value / 40));
+    }
+
+    function formatSpeedMultiplier(multiplier) {
+        if (multiplier >= 100000000) return (multiplier / 100000000).toFixed(1).replace(/\.0$/, '') + '억배';
+        if (multiplier >= 10000) return Math.round(multiplier / 10000) + '만배';
+        return multiplier.toLocaleString('ko-KR') + '배';
+    }
+
+    function bindCameraModeControls() {
+        updateModeButton();
+    }
+
+    function bindFreeFlightControls() {
+        const canvas = renderer.domElement;
+        canvas.addEventListener('pointerdown', onFreePointerDown);
+        canvas.addEventListener('pointermove', onFreePointerMove);
+        canvas.addEventListener('pointerup', onFreePointerUp);
+        canvas.addEventListener('pointercancel', onFreePointerUp);
+        canvas.addEventListener('pointerleave', onFreePointerUp);
     }
 
     function bindResize() {
@@ -982,7 +1023,58 @@
         speedSlider.dispatchEvent(new Event('input'));
     }
 
+    function toggleCameraMode() {
+        setCameraMode(state.cameraMode === 'focus' ? 'free' : 'focus');
+    }
+
+    function toggleSpeedPanel() {
+        const panel = document.getElementById('speed-panel');
+        const toggle = document.getElementById('panel-toggle');
+        if (!panel || !toggle) return;
+        const collapsed = panel.classList.toggle('collapsed');
+        toggle.textContent = collapsed ? '⋯' : '×';
+        toggle.setAttribute('aria-label', collapsed ? '시간 설정 펼치기' : '시간 설정 접기');
+    }
+
+    function setCameraMode(mode) {
+        state.cameraMode = mode;
+        controls.enabled = mode === 'focus';
+
+        if (mode === 'free') {
+            state.isTransitioning = false;
+            syncFreeFlightAngles();
+        } else {
+            state.isTransitioning = true;
+            state.freeFlight.activePointers.clear();
+            state.freeFlight.lastPrimary = null;
+            state.freeFlight.lastMidpoint = null;
+            state.freeFlight.lastPinchDistance = null;
+            state.freeFlight.skipNextRotate = false;
+        }
+
+        updateModeButton();
+    }
+
+    function updateModeButton() {
+        const button = document.getElementById('mode-toggle');
+        if (!button) return;
+        const free = state.cameraMode === 'free';
+        button.textContent = free ? '포커스 모드' : '자유비행';
+        button.classList.toggle('active', free);
+    }
+
+    function syncFreeFlightAngles() {
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+        state.freeFlight.yaw = Math.atan2(-direction.x, -direction.z);
+        state.freeFlight.pitch = Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1));
+        state.freeFlight.skipNextRotate = true;
+    }
+
     function focusPlanet(id) {
+        if (state.cameraMode === 'free') {
+            setCameraMode('focus');
+        }
         if (state.currentTarget === id && !state.isTransitioning) {
             buildButtons();
             return;
@@ -990,6 +1082,134 @@
         state.currentTarget = id;
         state.isTransitioning = true;
         buildButtons();
+    }
+
+    function onFreePointerDown(event) {
+        if (state.cameraMode !== 'free') return;
+        event.preventDefault();
+        try {
+            renderer.domElement.setPointerCapture(event.pointerId);
+        } catch (error) {
+            // Some WebViews and synthetic tests can emit pointer events without capture support.
+        }
+        state.freeFlight.activePointers.set(event.pointerId, {
+            x: event.clientX,
+            y: event.clientY,
+            startX: event.clientX,
+            startY: event.clientY
+        });
+
+        if (state.freeFlight.activePointers.size === 1) {
+            state.freeFlight.lastPrimary = { x: event.clientX, y: event.clientY };
+            state.freeFlight.lastPinchDistance = null;
+            state.freeFlight.skipNextRotate = true;
+        } else {
+            state.freeFlight.lastMidpoint = getPointerMidpoint();
+            state.freeFlight.lastPinchDistance = getPointerDistance();
+            state.freeFlight.skipNextRotate = false;
+        }
+    }
+
+    function onFreePointerMove(event) {
+        if (state.cameraMode !== 'free') return;
+        const pointer = state.freeFlight.activePointers.get(event.pointerId);
+        if (!pointer) return;
+        event.preventDefault();
+
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+        if (state.freeFlight.activePointers.size >= 2) {
+            moveFreeCameraByPinch();
+            return;
+        }
+
+        rotateFreeCamera(pointer);
+    }
+
+    function onFreePointerUp(event) {
+        if (state.cameraMode !== 'free') return;
+        state.freeFlight.activePointers.delete(event.pointerId);
+
+        if (renderer.domElement.hasPointerCapture && renderer.domElement.hasPointerCapture(event.pointerId)) {
+            renderer.domElement.releasePointerCapture(event.pointerId);
+        }
+
+        if (state.freeFlight.activePointers.size === 1) {
+            const pointer = Array.from(state.freeFlight.activePointers.values())[0];
+            state.freeFlight.lastPrimary = { x: pointer.x, y: pointer.y };
+            state.freeFlight.lastMidpoint = null;
+            state.freeFlight.lastPinchDistance = null;
+            state.freeFlight.skipNextRotate = true;
+        } else {
+            state.freeFlight.lastPrimary = null;
+            state.freeFlight.lastMidpoint = null;
+            state.freeFlight.lastPinchDistance = null;
+            state.freeFlight.skipNextRotate = false;
+        }
+    }
+
+    function rotateFreeCamera(pointer) {
+        if (!state.freeFlight.lastPrimary) {
+            state.freeFlight.lastPrimary = { x: pointer.x, y: pointer.y };
+            return;
+        }
+
+        if (state.freeFlight.skipNextRotate) {
+            state.freeFlight.lastPrimary = { x: pointer.x, y: pointer.y };
+            state.freeFlight.skipNextRotate = false;
+            return;
+        }
+
+        const dx = pointer.x - state.freeFlight.lastPrimary.x;
+        const dy = pointer.y - state.freeFlight.lastPrimary.y;
+        state.freeFlight.lastPrimary = { x: pointer.x, y: pointer.y };
+
+        state.freeFlight.yaw -= dx * 0.0042;
+        state.freeFlight.pitch -= dy * 0.0042;
+        state.freeFlight.pitch = THREE.MathUtils.clamp(state.freeFlight.pitch, -Math.PI * 0.48, Math.PI * 0.48);
+        camera.rotation.set(state.freeFlight.pitch, state.freeFlight.yaw, 0, 'YXZ');
+    }
+
+    function moveFreeCameraByPinch() {
+        const midpoint = getPointerMidpoint();
+        const pinchDistance = getPointerDistance();
+        if (!midpoint) return;
+        if (!state.freeFlight.lastMidpoint || !state.freeFlight.lastPinchDistance) {
+            state.freeFlight.lastMidpoint = midpoint;
+            state.freeFlight.lastPinchDistance = pinchDistance;
+            return;
+        }
+
+        const dx = midpoint.x - state.freeFlight.lastMidpoint.x;
+        const dy = midpoint.y - state.freeFlight.lastMidpoint.y;
+        const pinchDelta = pinchDistance - state.freeFlight.lastPinchDistance;
+        state.freeFlight.lastMidpoint = midpoint;
+        state.freeFlight.lastPinchDistance = pinchDistance;
+
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        const distanceScale = Math.max(0.08, camera.position.distanceTo(controls.target) * 0.0012);
+        const forwardScale = Math.max(0.8, Math.min(80, camera.position.distanceTo(controls.target) * 0.008));
+        camera.position.addScaledVector(right, -dx * distanceScale);
+        camera.position.addScaledVector(up, dy * distanceScale);
+        camera.position.addScaledVector(forward, pinchDelta * forwardScale);
+    }
+
+    function getPointerMidpoint() {
+        const pointers = Array.from(state.freeFlight.activePointers.values());
+        if (pointers.length < 2) return null;
+        return {
+            x: (pointers[0].x + pointers[1].x) * 0.5,
+            y: (pointers[0].y + pointers[1].y) * 0.5
+        };
+    }
+
+    function getPointerDistance() {
+        const pointers = Array.from(state.freeFlight.activePointers.values());
+        if (pointers.length < 2) return null;
+        return Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
     }
 
     function animate(now) {
@@ -1004,15 +1224,15 @@
         galaxyGroup.rotation.y = -(elapsedDays * 0.000001);
         andromedaGroup.rotation.y = elapsedDays * 0.0000005;
 
-        updateBodies(elapsedDays);
-        updateCameraTarget();
+        updateBodies(elapsedDays, deltaMs);
+        if (state.cameraMode === 'focus') updateCameraTarget();
         if (skyDome) skyDome.position.copy(camera.position);
 
-        controls.update();
+        if (state.cameraMode === 'focus') controls.update();
         renderer.render(scene, camera);
     }
 
-    function updateBodies(elapsedDays) {
+    function updateBodies(elapsedDays, deltaMs) {
         allOrbiters.forEach(function(record) {
             const body = record.body;
             if (body.distance > 0 && body.orbitPeriodDays) {
@@ -1020,15 +1240,32 @@
                 record.orbitPivot.rotation.y = orbitAngle;
             }
 
-            if (body.realtimeRotation) {
-                const timeFraction = (state.simulatedTimeMs % 86400000) / 86400000;
-                record.mesh.rotation.y = timeFraction * Math.PI * 2 + Math.PI * 1.35;
-            } else {
-                record.mesh.rotation.y += body.spinSpeed * (state.speedMultiplier / 50000);
-            }
+            updateBodyRotation(record, deltaMs);
 
             record.mesh.getWorldPosition(record.globalPos);
         });
+    }
+
+    function updateBodyRotation(record, deltaMs) {
+        const body = record.body;
+        const visualSpeed = Math.min(state.speedMultiplier, ROTATION_VISUAL_SPEED_CAP);
+
+        if (body.realtimeRotation) {
+            const timeFraction = (state.simulatedTimeMs % 86400000) / 86400000;
+            const targetRotation = timeFraction * Math.PI * 2 + Math.PI * 1.35;
+            if (state.speedMultiplier <= ROTATION_VISUAL_SPEED_CAP) {
+                record.visualRotationY = null;
+                record.mesh.rotation.y = targetRotation;
+                return;
+            }
+
+            if (record.visualRotationY === null) record.visualRotationY = targetRotation;
+            record.visualRotationY += (deltaMs * visualSpeed / 86400000) * Math.PI * 2;
+            record.mesh.rotation.y = record.visualRotationY;
+            return;
+        }
+
+        record.mesh.rotation.y += body.spinSpeed * (visualSpeed / 50000);
     }
 
     function updateCameraTarget() {
@@ -1081,7 +1318,9 @@
 
     window.UniverseApp = {
         resetToRealTime,
-        focusPlanet
+        focusPlanet,
+        toggleCameraMode,
+        toggleSpeedPanel
     };
 
     init();
